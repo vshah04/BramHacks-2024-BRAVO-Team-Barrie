@@ -1,0 +1,83 @@
+import pandas as pd
+import datetime
+import joblib
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import LabelEncoder
+
+# Load the combined dataset
+df = pd.read_csv('combined_data16_28.csv')
+
+# Strip any extra spaces from column names
+df.columns = df.columns.str.strip()
+
+# Step 1: Convert Day (16 to 28) to Day of the Week
+start_date = datetime.date(2024, 9, 16)  # September 16, 2024, which is a Monday
+df['Date'] = df['Day'].apply(lambda x: start_date + datetime.timedelta(days=(x - 16)))
+df['Day_of_Week'] = df['Date'].apply(lambda x: x.weekday())  # 0=Monday, 1=Tuesday, ..., 6=Sunday
+
+# Convert 'Door Open Time' to hour and minute
+df['Door Open Time'] = pd.to_datetime(df['Door Open Time'], errors='coerce', format='%H:%M:%S')
+df['Door Open Time'] = df['Door Open Time'].fillna(pd.to_datetime('00:00:00', format='%H:%M:%S'))
+df['Door Open Hour'] = df['Door Open Time'].dt.hour
+df['Door Open Minute'] = df['Door Open Time'].dt.minute
+
+# Label encode the Bus Stop Number
+label_encoder = LabelEncoder()
+df['Bus Stop Number Encoded'] = label_encoder.fit_transform(df['Bus Stop Number'].astype(str))
+
+# Drop unnecessary columns for prediction
+df = df[['Bus Stop Number Encoded', 'Day_of_Week', 'Door Open Hour', 'Door Open Minute', 'Off\'s']]
+
+# Step 2: Train the Model
+X = df[['Bus Stop Number Encoded', 'Day_of_Week', 'Door Open Hour', 'Door Open Minute']]  # Features
+y = df['Off\'s']  # Target variable
+
+# Train the Random Forest model
+model = RandomForestRegressor(n_estimators=100, random_state=42)
+model.fit(X, y)
+
+# Save the trained model
+joblib.dump(model, 'bus_stop_model.pkl')
+
+# Step 3: Function to predict the number of people getting off at a bus stop on a given day and time
+def predict_passenger_count(bus_stop_number, date_str, time_str):
+    # Step 3.1: Convert the input date (e.g., "2024-09-29") to datetime object
+    try:
+        date = pd.to_datetime(date_str, format='%Y-%m-%d')
+    except Exception as e:
+        print(f"Error parsing date: {e}")
+        return
+
+    # Step 3.2: Convert the input time (e.g., "10:30:00") to hour and minute
+    try:
+        door_open_time = pd.to_datetime(time_str, format='%H:%M:%S')
+        door_open_hour = door_open_time.hour
+        door_open_minute = door_open_time.minute
+    except Exception as e:
+        print(f"Error parsing time: {e}")
+        return
+
+    # Step 3.3: Calculate the day of the week (0=Monday, 1=Tuesday, ..., 6=Sunday)
+    day_of_week = date.weekday()  # 0=Monday, 1=Tuesday, ..., 6=Sunday
+
+    # Step 3.4: Label encode the bus stop number (as done in training)
+    bus_stop_number_encoded = label_encoder.transform([str(bus_stop_number)])[0]
+
+    # Step 3.5: Prepare the input data for prediction
+    input_data = [[bus_stop_number_encoded, day_of_week, door_open_hour, door_open_minute]]
+
+    # Step 3.6: Load the trained model and make prediction
+    model = joblib.load('bus_stop_model.pkl')
+    prediction = model.predict(input_data)
+    
+    # Return the predicted number of people getting off
+    print(f"Predicted number of people getting off at stop {bus_stop_number} on {date_str} at {time_str}: {prediction[0]:.0f}")
+
+# Step 4: Example usage of the prediction function
+# Ask user for input (stop number, date, and time)
+bus_stop_number = int(input("Enter the Bus Stop Number: "))
+date_str = input("Enter the Date (YYYY-MM-DD): ")  # User enters the date (e.g., "2024-09-29")
+time_str = input("Enter the Time (HH:MM:SS): ")  # User enters the time (e.g., "10:30:00")
+
+# Predict the number of passengers getting off
+predict_passenger_count(bus_stop_number, date_str, time_str)
